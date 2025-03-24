@@ -2,7 +2,7 @@ package hk.ust.csit5970;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Map;
+import java.util.Map.Entry;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -16,7 +16,6 @@ import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.FloatWritable;
-import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
@@ -54,6 +53,20 @@ public class BigramFrequencyStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			if (words.length > 1) {
+				KEY.set(words[0]);
+				for (int i = 1; i < words.length; i++) {
+					String w = words[i];
+					// Skip empty words
+					if (w.length() == 0) {
+						continue;
+					}
+					STRIPE.increment(w);
+					context.write(KEY, STRIPE);
+					KEY.set(w);
+					STRIPE.clear();
+				}
+			}
 		}
 	}
 
@@ -75,6 +88,29 @@ public class BigramFrequencyStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			for (HashMapStringIntWritable stripe : stripes) {
+				SUM_STRIPES.plus(stripe);
+			}
+			String keyword = key.toString();
+			float total = 0;
+			for (int count : SUM_STRIPES.values()) {
+				total += count;
+			}
+			// set total
+			BIGRAM.set(keyword, "");
+			FREQ.set(total);
+			context.write(BIGRAM, FREQ);
+
+			// set probability
+			for (Entry<String, Integer> mapElement : SUM_STRIPES.entrySet()) {
+				String second_w = mapElement.getKey();
+				int value = mapElement.getValue();
+				BIGRAM.set(keyword, second_w);
+				FREQ.set(value / total);
+				context.write(BIGRAM, FREQ);
+			}
+
+			SUM_STRIPES.clear();
 		}
 	}
 
@@ -94,6 +130,13 @@ public class BigramFrequencyStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			for (HashMapStringIntWritable stripe : stripes) {
+				for (String second_w : stripe.keySet()) {
+					SUM_STRIPES.increment(second_w);
+				}
+			}
+			context.write(key, SUM_STRIPES);
+			SUM_STRIPES.clear();
 		}
 	}
 
