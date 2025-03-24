@@ -5,10 +5,6 @@ import org.apache.commons.cli.Options;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.fs.*;
-import org.apache.hadoop.io.FloatWritable;
-import org.apache.hadoop.io.IntWritable;
-import org.apache.hadoop.io.LongWritable;
-import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Partitioner;
@@ -19,18 +15,17 @@ import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 import org.apache.log4j.Logger;
 
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.io.*;
+import hk.ust.csit5970.CORPairs.CORPairsMapper2;
+import hk.ust.csit5970.CORPairs.CORPairsReducer2;
 
+import org.apache.hadoop.io.*;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URI;
 import java.util.*;
-import java.util.Arrays;
-import java.util.HashMap;
+import java.util.Map.Entry;
 
 /**
  * Compute the bigram count using "pairs" approach
@@ -43,6 +38,9 @@ public class CORPairs extends Configured implements Tool {
 	 */
 	private static class CORMapper1 extends
 			Mapper<LongWritable, Text, Text, IntWritable> {
+		private final static IntWritable VALUE = new IntWritable();
+		private final static Text TOKEN = new Text();
+
 		@Override
 		public void map(LongWritable key, Text value, Context context)
 				throws IOException, InterruptedException {
@@ -53,6 +51,19 @@ public class CORPairs extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			while (doc_tokenizer.hasMoreTokens()) {
+				String token = doc_tokenizer.nextToken();
+				if (word_set.containsKey(token)) {
+					word_set.put(token, word_set.get(token) + 1);
+				} else {
+					word_set.put(token, 1);
+				}
+			}
+			for (Entry<String, Integer> entry : word_set.entrySet()) {
+				TOKEN.set(entry.getKey());
+				VALUE.set(entry.getValue());
+				context.write(TOKEN, VALUE);
+			}
 		}
 	}
 
@@ -61,19 +72,30 @@ public class CORPairs extends Configured implements Tool {
 	 */
 	private static class CORReducer1 extends
 			Reducer<Text, IntWritable, Text, IntWritable> {
+		private final static IntWritable SUM = new IntWritable();
+
 		@Override
-		public void reduce(Text key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
+		public void reduce(Text key, Iterable<IntWritable> values, Context context)
+				throws IOException, InterruptedException {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			int sum = 0;
+			for (IntWritable val : values) {
+				sum += val.get();
+			}
+			SUM.set(sum);
+			context.write(key, SUM);
 		}
 	}
-
 
 	/*
 	 * TODO: Write your second-pass Mapper here.
 	 */
 	public static class CORPairsMapper2 extends Mapper<LongWritable, Text, PairOfStrings, IntWritable> {
+		private static final IntWritable ONE = new IntWritable(1);
+		private static final PairOfStrings BIGRAM = new PairOfStrings();
+
 		@Override
 		protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
 			// Please use this tokenizer! DO NOT implement a tokenizer by yourself!
@@ -81,6 +103,19 @@ public class CORPairs extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			Set<String> words = new HashSet<String>();
+			while (doc_tokenizer.hasMoreTokens()) {
+				words.add(doc_tokenizer.nextToken());
+			}
+			List<String> sortedList = new ArrayList<String>(words);
+			Collections.sort(sortedList);
+			for (int i = 0; i < sortedList.size() - 1; i++) {
+				String lword = sortedList.get(i);
+				for (int j = i + 1; j < sortedList.size(); j++) {
+					BIGRAM.set(lword, sortedList.get(j));
+					context.write(BIGRAM, ONE);
+				}
+			}
 		}
 	}
 
@@ -88,11 +123,20 @@ public class CORPairs extends Configured implements Tool {
 	 * TODO: Write your second-pass Combiner here.
 	 */
 	private static class CORPairsCombiner2 extends Reducer<PairOfStrings, IntWritable, PairOfStrings, IntWritable> {
+		private static final IntWritable SUM = new IntWritable();
+
 		@Override
-		protected void reduce(PairOfStrings key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
+		protected void reduce(PairOfStrings key, Iterable<IntWritable> values, Context context)
+				throws IOException, InterruptedException {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			int sum = 0;
+			for (IntWritable val : values) {
+				sum += val.get();
+			}
+			SUM.set(sum);
+			context.write(key, SUM);
 		}
 	}
 
@@ -102,9 +146,12 @@ public class CORPairs extends Configured implements Tool {
 	public static class CORPairsReducer2 extends Reducer<PairOfStrings, IntWritable, PairOfStrings, DoubleWritable> {
 		private final static Map<String, Integer> word_total_map = new HashMap<String, Integer>();
 
+		private static final DoubleWritable VALUE = new DoubleWritable();
+
 		/*
 		 * Preload the middle result file.
-		 * In the middle result file, each line contains a word and its frequency Freq(A), seperated by "\t"
+		 * In the middle result file, each line contains a word and its frequency
+		 * Freq(A), seperated by "\t"
 		 */
 		@Override
 		protected void setup(Context context) throws IOException, InterruptedException {
@@ -141,10 +188,18 @@ public class CORPairs extends Configured implements Tool {
 		 * TODO: write your second-pass Reducer here.
 		 */
 		@Override
-		protected void reduce(PairOfStrings key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
+		protected void reduce(PairOfStrings key, Iterable<IntWritable> values, Context context)
+				throws IOException, InterruptedException {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			double sum = 0;
+			for (IntWritable val : values) {
+				sum += val.get();
+			}
+
+			VALUE.set(sum / (word_total_map.get(key.getLeftElement()) * word_total_map.get(key.getRightElement())));
+			context.write(key, VALUE);
 		}
 	}
 
@@ -242,7 +297,6 @@ public class CORPairs extends Configured implements Tool {
 		// Delete the output directory if it exists already.
 		Path outputDir = new Path(outputPath);
 		FileSystem.get(conf1).delete(outputDir, true);
-
 
 		Configuration conf2 = new Configuration();
 		Job job2 = Job.getInstance(conf2, "Secondpass");
