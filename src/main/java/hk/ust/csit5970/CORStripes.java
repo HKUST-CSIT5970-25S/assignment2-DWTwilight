@@ -16,11 +16,16 @@ import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 import org.apache.log4j.Logger;
 
+import hk.ust.csit5970.CORStripes.CORStripesCombiner2;
+import hk.ust.csit5970.CORStripes.CORStripesMapper2;
+import hk.ust.csit5970.CORStripes.CORStripesReducer2;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URI;
 import java.util.*;
+import java.util.Map.Entry;
 
 /**
  * Compute the bigram count using "pairs" approach
@@ -33,6 +38,9 @@ public class CORStripes extends Configured implements Tool {
 	 */
 	private static class CORMapper1 extends
 			Mapper<LongWritable, Text, Text, IntWritable> {
+		private final static IntWritable VALUE = new IntWritable();
+		private final static Text TOKEN = new Text();
+
 		@Override
 		public void map(LongWritable key, Text value, Context context)
 				throws IOException, InterruptedException {
@@ -43,6 +51,19 @@ public class CORStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			while (doc_tokenizer.hasMoreTokens()) {
+				String token = doc_tokenizer.nextToken();
+				if (word_set.containsKey(token)) {
+					word_set.put(token, word_set.get(token) + 1);
+				} else {
+					word_set.put(token, 1);
+				}
+			}
+			for (Entry<String, Integer> entry : word_set.entrySet()) {
+				TOKEN.set(entry.getKey());
+				VALUE.set(entry.getValue());
+				context.write(TOKEN, VALUE);
+			}
 		}
 	}
 
@@ -51,11 +72,20 @@ public class CORStripes extends Configured implements Tool {
 	 */
 	private static class CORReducer1 extends
 			Reducer<Text, IntWritable, Text, IntWritable> {
+		private final static IntWritable SUM = new IntWritable();
+
 		@Override
-		public void reduce(Text key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
+		public void reduce(Text key, Iterable<IntWritable> values, Context context)
+				throws IOException, InterruptedException {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			int sum = 0;
+			for (IntWritable val : values) {
+				sum += val.get();
+			}
+			SUM.set(sum);
+			context.write(key, SUM);
 		}
 	}
 
@@ -63,6 +93,11 @@ public class CORStripes extends Configured implements Tool {
 	 * TODO: Write your second-pass Mapper here.
 	 */
 	public static class CORStripesMapper2 extends Mapper<LongWritable, Text, Text, MapWritable> {
+		private static final Text KEY = new Text();
+		private static final MapWritable MAP = new MapWritable();
+		private static final IntWritable ZERO = new IntWritable(0);
+		private static final HashMapStringIntWritable HASH_MAP_STRING_INT = new HashMapStringIntWritable();
+
 		@Override
 		protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
 			Set<String> sorted_word_set = new TreeSet<String>();
@@ -75,6 +110,16 @@ public class CORStripes extends Configured implements Tool {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			List<String> sortedList = new ArrayList<String>(sorted_word_set);
+			for (int i = 0; i < sortedList.size() - 1; i++) {
+				for (int j = i + 1; j < sortedList.size(); j++) {
+					HASH_MAP_STRING_INT.increment(sortedList.get(j));
+				}
+				KEY.set(sortedList.get(i));
+				MAP.put(ZERO, HASH_MAP_STRING_INT);
+				context.write(KEY, MAP);
+				HASH_MAP_STRING_INT.clear();
+			}
 		}
 	}
 
@@ -82,13 +127,22 @@ public class CORStripes extends Configured implements Tool {
 	 * TODO: Write your second-pass Combiner here.
 	 */
 	public static class CORStripesCombiner2 extends Reducer<Text, MapWritable, Text, MapWritable> {
-		static IntWritable ZERO = new IntWritable(0);
+		private static final IntWritable ZERO = new IntWritable(0);
+		private static final MapWritable MAP = new MapWritable();
+		private static final HashMapStringIntWritable HASH_MAP_STRING_INT = new HashMapStringIntWritable();
 
 		@Override
-		protected void reduce(Text key, Iterable<MapWritable> values, Context context) throws IOException, InterruptedException {
+		protected void reduce(Text key, Iterable<MapWritable> values, Context context)
+				throws IOException, InterruptedException {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			for (MapWritable map : values) {
+				HASH_MAP_STRING_INT.plus((HashMapStringIntWritable) map.get(ZERO));
+			}
+			MAP.put(ZERO, HASH_MAP_STRING_INT);
+			context.write(key, MAP);
+			HASH_MAP_STRING_INT.clear();
 		}
 	}
 
@@ -96,12 +150,16 @@ public class CORStripes extends Configured implements Tool {
 	 * TODO: Write your second-pass Reducer here.
 	 */
 	public static class CORStripesReducer2 extends Reducer<Text, MapWritable, PairOfStrings, DoubleWritable> {
-		private static Map<String, Integer> word_total_map = new HashMap<String, Integer>();
-		private static IntWritable ZERO = new IntWritable(0);
+		private static final Map<String, Integer> word_total_map = new HashMap<String, Integer>();
+		private static final IntWritable ZERO = new IntWritable(0);
+		private static final HashMapStringIntWritable HASH_MAP_STRING_INT = new HashMapStringIntWritable();
+		private static final DoubleWritable VALUE = new DoubleWritable();
+		private static final PairOfStrings KEY_PAIR = new PairOfStrings();
 
 		/*
 		 * Preload the middle result file.
-		 * In the middle result file, each line contains a word and its frequency Freq(A), seperated by "\t"
+		 * In the middle result file, each line contains a word and its frequency
+		 * Freq(A), seperated by "\t"
 		 */
 		@Override
 		protected void setup(Context context) throws IOException, InterruptedException {
@@ -138,10 +196,32 @@ public class CORStripes extends Configured implements Tool {
 		 * TODO: Write your second-pass Reducer here.
 		 */
 		@Override
-		protected void reduce(Text key, Iterable<MapWritable> values, Context context) throws IOException, InterruptedException {
+		protected void reduce(Text key, Iterable<MapWritable> values, Context context)
+				throws IOException, InterruptedException {
 			/*
 			 * TODO: Your implementation goes here.
 			 */
+			for (MapWritable map : values) {
+				HASH_MAP_STRING_INT.plus((HashMapStringIntWritable) map.get(ZERO));
+			}
+
+			List<Entry<String, Integer>> entryList = new ArrayList<Entry<String, Integer>>(
+					HASH_MAP_STRING_INT.entrySet());
+			HASH_MAP_STRING_INT.clear();
+			Collections.sort(entryList, new Comparator<Entry<String, Integer>>() {
+				@Override
+				public int compare(Entry<String, Integer> o1, Entry<String, Integer> o2) {
+					return o1.getKey().compareTo(o2.getKey());
+				}
+			});
+
+			String keyStr = key.toString();
+			for (Entry<String, Integer> entry : entryList) {
+				VALUE.set((double) entry.getValue()
+						/ (word_total_map.get(keyStr) * word_total_map.get(entry.getKey())));
+				KEY_PAIR.set(keyStr, entry.getKey());
+				context.write(KEY_PAIR, VALUE);
+			}
 		}
 	}
 
@@ -232,7 +312,6 @@ public class CORStripes extends Configured implements Tool {
 		// Delete the output directory if it exists already.
 		Path outputDir = new Path(outputPath);
 		FileSystem.get(conf1).delete(outputDir, true);
-
 
 		Configuration conf2 = new Configuration();
 		Job job2 = Job.getInstance(conf2, "Secondpass");
